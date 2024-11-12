@@ -1,13 +1,29 @@
 package com.example.loginapp
 
+import androidx.compose.ui.semantics.password
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
+import com.example.loginapp.DataTypes.PatientInfo
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.firestore
+import kotlin.text.isBlank
+import kotlin.text.matches
+
 
 class AuthViewModel: ViewModel() {
+
+
+    sealed class UserType {
+        object Patient : UserType()
+        object Doctor : UserType()
+    }
+
+    private val db = Firebase.firestore
+
 
     /**
      * Purpose:
@@ -86,8 +102,64 @@ class AuthViewModel: ViewModel() {
         }
     }
 
+    fun signupPatient(patientInfo: PatientInfo) {
+        // 1. Basic Input Validation
+        if (patientInfo.name.isBlank() || patientInfo.email.isBlank() || patientInfo.password.isBlank()) {
+            _authState.value = AuthState.Error("Please fill in all required fields.")
+            return
+        }
+
+        // 2. Email Format Validation (Using a simple regex, consider a library for more robust validation)
+        if (!patientInfo.email.matches(Regex("[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"))) {
+            _authState.value = AuthState.Error("Please enter a valid email address.")
+            return
+        }
+
+        // 3. Password Strength Validation (Optional, add your own rules or use a library)
+        if (patientInfo.password.length < 6) {
+            _authState.value = AuthState.Error("Password must be at least 6 characters long.")
+            return
+        }
+
+        // 4. Update authState to Loading
+        _authState.value = AuthState.Loading
+
+        // 5. Create User with Firebase Authentication
+        auth.createUserWithEmailAndPassword(patientInfo.email, patientInfo.password)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val uid = task.result?.user?.uid
+                    if (uid != null) {
+                        // 6. Store Patient Data in Firestore
+                        val patientData = hashMapOf(
+                            "name" to patientInfo.name,
+                            "email" to patientInfo.email,
+                            "doctorId" to patientInfo.doctorId,
+                            "password" to patientInfo.password
+                        )
+
+                        db.collection("patients").document(uid).set(patientData)
+                            .addOnSuccessListener {
+                                _authState.value = AuthState.Authenticated
+                            }
+                            .addOnFailureListener { exception: Exception ->
+                                _authState.value = AuthState.Error(exception.message ?: "Failed to save patient data.")
+                            }
+                    } else {
+                        _authState.value = AuthState.Error("User creation failed.")
+                    }
+                } else {
+                    _authState.value = AuthState.Error(task.exception?.message ?: "Signup failed.")
+                }
+            }
+    }
+
+
+
 
 }
+
+
 
 sealed class AuthState{
 
